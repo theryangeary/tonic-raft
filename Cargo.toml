@@ -1,0 +1,29 @@
+[package]
+name = "tonic-raft"
+version = "0.1.0"
+authors = ["Ryan Geary <rtgnj42@gmail.com>"]
+edition = "2018"
+license = "Apache-2.0"
+description = "A distributed event-streaming platform"
+homepage = "https://github.com/theryangeary/tonic-raft"
+repository = "https://github.com/theryangeary/tonic-raft"
+readme = "README.md"
+keywords = ["raft", "distributed-systems", "consensus", "state-machine"]
+categories = ["web-programming", "network-programming", "database-implementations", "concurrency"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-stream = "0.3"
+chrono = "0.4"
+futures = "0.3"
+prost = "0.7"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+structopt = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+tokio-stream = "0.1"
+tonic = "0.4"
+
+[build-dependencies]
+tonic-build = "0.4"
