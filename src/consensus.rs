@@ -1,4 +1,4 @@
-use crate::raft::log::{InMemoryLog, Log};
+use crate::log::Log;
 use raft::consensus_client::ConsensusClient;
 use raft::consensus_server::Consensus;
 use raft::{AppendEntriesRequest, AppendEntriesResponse, RequestVoteRequest, RequestVoteResponse};
@@ -112,24 +112,24 @@ where
         let commit_index_handle = Arc::clone(&commit_index);
         let brokers_handle = Arc::clone(&brokers);
         let next_index_handle = Arc::clone(&next_index);
-        let match_index_handle = Arc::clone(&match_index);
+        let _match_index_handle = Arc::clone(&match_index);
 
-        let role_transition_task = tokio::spawn(async move {
+        let _role_transition_task = tokio::spawn(async move {
             while let Some(role) = role_transition_rx.recv().await {
                 let role_transition_tx = role_transition_tx2.clone();
-                set_role(&role_handle, role);
+                set_role(&role_handle, role).await;
                 match role {
                     Role::Follower => {
                         // set thread to handle election timeout
                         let mut election_timeout_reset_rx = election_timeout_reset_tx2.subscribe();
-                        let election_timeout_task = tokio::spawn(async move {
-                            if let Err(Elapsed) = timeout(
+                        let _election_timeout_task = tokio::spawn(async move {
+                            if let Err(_elapsed) = timeout(
                                 Duration::from_millis(150u64 + (rand::random::<u64>() % 150u64)),
                                 election_timeout_reset_rx.recv(),
                             )
                             .await
                             {
-                                role_transition_tx.send(Role::Candidate).await;
+                                let _send_result = role_transition_tx.send(Role::Candidate).await;
                             }
                         });
                     }
@@ -161,7 +161,7 @@ where
                                 "broker {} becomes the leader",
                                 id_handle.load(Ordering::SeqCst)
                             );
-                            role_transition_tx.send(Role::Leader).await;
+                            let _send_result = role_transition_tx.send(Role::Leader).await;
                         }
                         println!(
                             "broker {} got {} votes",
@@ -216,14 +216,14 @@ where
                                         })
                                     };
 
-                                    let response = client.append_entries(request).await.unwrap();
+                                    let _response = client.append_entries(request).await.unwrap();
                                 }
 
                                 interval.tick().await;
                             }
                         });
 
-                        heartbeat_task.await;
+                        let _heartbeat_result = heartbeat_task.await;
                     }
                 }
             }
@@ -232,7 +232,7 @@ where
         // start the server off as a follower
         let role_transition_tx2 = role_transition_tx.clone();
         tokio::spawn(async move {
-            role_transition_tx2.send(Role::Follower).await;
+            let _send_result = role_transition_tx2.send(Role::Follower).await;
         });
 
         Self {
@@ -254,7 +254,7 @@ where
 
     /// Set current role being performed by the server
     async fn set_role(&self, new_role: Role) {
-        set_role(&self.role, new_role);
+        set_role(&self.role, new_role).await;
     }
 
     /// Get current term
@@ -333,7 +333,7 @@ where
 
         // if AppendEntries rpc received from new leader, convert to follower
         if *self.role.read().await == Role::Candidate {
-            self.role_transition_tx.send(Role::Follower).await;
+            let _send_result = self.role_transition_tx.send(Role::Follower).await;
         }
 
         // reply false if log doesn't contain an entry at prev_log_index whose term matches
@@ -355,10 +355,13 @@ where
         // TODO this can be more efficient by not blindly removing everything after
         // prev_log_index, and instead verifying what needs to be removed
         while let Ok(Some(_)) = self.log.get(inner.prev_log_index + 1).await {
-            self.log.pop().await;
+            let _entry = self.log.pop().await;
         }
 
-        self.log.extend(inner.entries).await;
+        if let Err(e) = self.log.extend(inner.entries).await {
+            println!("Error encountered adding entries to log: {}", e);
+            return Ok(response(false));
+        }
 
         let last_new_entry_index = self.log.last_index().await;
 

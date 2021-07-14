@@ -2,7 +2,7 @@ use std::convert::TryInto;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::raft::consensus::Entry;
+use crate::consensus::Entry;
 
 #[tonic::async_trait]
 // TODO check if LogError should actually be an associated type
