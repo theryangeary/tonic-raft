@@ -15,7 +15,9 @@ use crate::consensus::Entry;
 /// leader's term, and a serialized data payload based on the consuming application.
 pub trait Log<Entry, LogError>: Default + std::fmt::Debug + Clone + Send + Sync {
     /// Append log entry to log
-    async fn append(&self, entry: Entry) -> Result<(), LogError>;
+    ///
+    /// Returns index of new log entry
+    async fn append(&self, entry: Entry) -> Result<u64, LogError>;
 
     /// Get index of last log entry
     async fn last_index(&self) -> u64;
@@ -30,11 +32,14 @@ pub trait Log<Entry, LogError>: Default + std::fmt::Debug + Clone + Send + Sync 
     /// Return Err(_) if an error occurs evaluating this request.
     async fn get(&self, index: u64) -> Result<Option<Entry>, LogError>;
 
+    /// Get log entries following index
+    async fn get_from(&self, index: u64) -> Result<Vec<Entry>, LogError>;
+
     /// Remove last log entry
     ///
-    /// Raft logs are intended to be write-only in general, but in error conditions different
-    /// brokers' logs can become out of sync, so we must remove some log entries based on the
-    /// leader's log.
+    /// Raft logs are intended to be write-only once properly replicated, but in error conditions
+    /// different brokers' logs can become out of sync, so we must remove some log entries based on
+    /// the leader's log.
     async fn pop(&self) -> Result<Option<Entry>, LogError>;
 
     /// Extend log with entries
@@ -59,10 +64,11 @@ impl InMemoryLog {
 #[tonic::async_trait]
 // TODO replace String with a proper error type
 impl Log<Entry, String> for InMemoryLog {
-    async fn append(&self, entry: Entry) -> Result<(), String> {
-        self.entries.write().await.push(entry);
+    async fn append(&self, entry: Entry) -> Result<u64, String> {
+        let mut vec = self.entries.write().await;
+        vec.push(entry);
 
-        Ok(())
+        Ok((vec.len() - 1).try_into().unwrap())
     }
     async fn last_index(&self) -> u64 {
         (self.entries.read().await.len() - 1).try_into().unwrap()
@@ -84,6 +90,17 @@ impl Log<Entry, String> for InMemoryLog {
             .await
             .get::<usize>(index.try_into().unwrap())
             .map(Clone::clone))
+    }
+
+    async fn get_from(&self, index: u64) -> Result<Vec<Entry>, String> {
+        Ok(self
+            .entries
+            .read()
+            .await
+            .iter()
+            .skip(std::cmp::min(0, (index - 1).try_into().unwrap()))
+            .cloned()
+            .collect())
     }
 
     async fn pop(&self) -> Result<Option<Entry>, String> {
