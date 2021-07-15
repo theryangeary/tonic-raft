@@ -98,7 +98,7 @@ impl Log<Entry, String> for InMemoryLog {
             .read()
             .await
             .iter()
-            .skip(std::cmp::min(0, (index - 1).try_into().unwrap()))
+            .skip(index.try_into().unwrap())
             .cloned()
             .collect())
     }

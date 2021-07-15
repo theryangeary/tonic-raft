@@ -1,3 +1,4 @@
+use crate::entry_appender::EntryAppender;
 use crate::log::Log;
 use raft::consensus_client::ConsensusClient;
 use raft::consensus_server::Consensus;
@@ -155,6 +156,10 @@ where
                             .push(election_timeout_task);
                     }
                     Role::Candidate => {
+                        let old_term = current_term_handle.load(Ordering::SeqCst);
+                        let new_term = old_term + 1;
+                        current_term_handle.store(new_term, Ordering::SeqCst);
+
                         let broker_list = brokers_handle.read().await;
                         let votes_needed_to_become_leader = broker_list.len() / 2 + 1;
                         let mut votes = 0;
@@ -308,13 +313,12 @@ where
                             }
 
                             loop {
-                                let prev_log_index = log_handle3.last_index().await;
-                                let prev_log_term = log_handle3.last_term().await;
+                                let last_log_index = log_handle3.last_index().await;
 
                                 for (broker_socket_addr, next_index) in
                                     next_index_handle.write().await.iter_mut()
                                 {
-                                    if prev_log_index > *next_index {
+                                    if last_log_index >= *next_index {
                                         let mut client = ConsensusClient::connect(format!(
                                             "http://{}",
                                             broker_socket_addr
@@ -326,6 +330,14 @@ where
                                             log_handle3.get_from(*next_index).await.unwrap();
                                         let entries_len = entries.len() as u64;
 
+                                        let prev_log_index = next_index.saturating_sub(1);
+                                        let prev_log_term = log_handle3
+                                            .get(prev_log_index)
+                                            .await
+                                            .expect("Error accessing log")
+                                            .expect("There shoulda been a log at this index")
+                                            .term;
+
                                         let request = Request::new(AppendEntriesRequest {
                                             term: current_term.load(Ordering::SeqCst),
                                             leader_id: id.load(Ordering::SeqCst),
@@ -335,20 +347,20 @@ where
                                             leader_commit: commit_index.load(Ordering::SeqCst),
                                         });
 
-                                        if client
+                                        let inner = client
                                             .append_entries(request)
                                             .await
                                             .unwrap()
-                                            .into_inner()
-                                            .success
-                                        {
+                                            .into_inner();
+
+                                        if inner.success {
                                             *next_index += entries_len;
-                                            match_indexes
-                                                .write()
-                                                .await
-                                                .insert(*broker_socket_addr, *next_index - 1);
+                                            match_indexes.write().await.insert(
+                                                *broker_socket_addr,
+                                                next_index.saturating_sub(1),
+                                            );
                                         } else {
-                                            *next_index -= 1;
+                                            *next_index = next_index.saturating_sub(1);
                                         }
                                     }
                                 }
@@ -373,7 +385,6 @@ where
 
                             loop {
                                 let n = commit_index.load(Ordering::SeqCst) + 1;
-
                                 let num_matching = match_indexes
                                     .read()
                                     .await
@@ -407,18 +418,17 @@ where
             let _send_result = role_transition_tx2.send(Role::Follower).await;
         });
 
-        let mut rx = log_entry_tx_watch_rx.clone();
+        let current_term_handle = Arc::clone(&current_term);
+        let rx = log_entry_tx_watch_rx.clone();
         tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
             if *role.read().await == Role::Leader {
-                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                let entry_tx = rx.borrow_and_update().clone();
-                entry_tx
-                    .send(Entry {
-                        data: vec![],
-                        term: 1,
-                    })
-                    .await
-                    .unwrap();
+                let mut entry_appender = EntryAppender::new(current_term_handle, rx);
+                for _ in 1..=5 {
+                    if let Err(e) = entry_appender.append_entry(vec![1, 2, 3, 4]).await {
+                        eprintln!("{}", e);
+                    }
+                }
             }
         });
 
@@ -488,6 +498,14 @@ where
             self.set_role(Role::Follower).await;
         }
     }
+
+    /// Get EntryAppender, for leader to append logs with
+    pub fn entry_appender(&self) -> EntryAppender {
+        EntryAppender::new(
+            Arc::clone(&self.current_term),
+            self.log_entry_tx_watch_rx.clone(),
+        )
+    }
 }
 
 #[tonic::async_trait]
@@ -521,13 +539,8 @@ where
             return Ok(response(false));
         }
 
-        println!(
-            "got append entries while role: {:?}",
-            self.role.read().await
-        );
         // if AppendEntries rpc received from new leader, convert to follower
         if *self.role.read().await == Role::Candidate {
-            println!("I am candidate, but will become Follower");
             let _send_result = self.role_transition_tx.send(Role::Follower).await;
         }
 
@@ -546,7 +559,9 @@ where
                     return Ok(response(false));
                 }
             }
-            Ok(None) => return Ok(response(false)),
+            Ok(None) => {
+                return Ok(response(false));
+            }
             Err(e) => {
                 eprintln!("Error accessing log: {:?}", e);
                 return Ok(response(false));
