@@ -1,8 +1,13 @@
+use serde::Serialize;
 use std::convert::TryInto;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::consensus::Entry;
+
+/// Trait for making a type capable of being the replicated state machine's set of possible
+/// transitions
+pub trait Transition: Serialize {}
 
 #[tonic::async_trait]
 // TODO check if LogError should actually be an associated type

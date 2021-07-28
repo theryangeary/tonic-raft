@@ -418,20 +418,6 @@ where
             let _send_result = role_transition_tx2.send(Role::Follower).await;
         });
 
-        let current_term_handle = Arc::clone(&current_term);
-        let rx = log_entry_tx_watch_rx.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-            if *role.read().await == Role::Leader {
-                let mut entry_appender = EntryAppender::new(current_term_handle, rx);
-                for _ in 1..=5 {
-                    if let Err(e) = entry_appender.append_entry(vec![1, 2, 3, 4]).await {
-                        eprintln!("{}", e);
-                    }
-                }
-            }
-        });
-
         Self {
             brokers,
             commit_index,

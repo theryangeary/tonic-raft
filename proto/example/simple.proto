@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package valuestore;
+
+service ValueStore {
+  // Get the stored value
+  rpc Get (GetRequest) returns (GetResponse) {}
+
+  // Set the stored value to a new value
+  rpc Set (SetRequest) returns (SetResponse) {}
+}
+
+message GetRequest {}
+
+message GetResponse {
+  int32 value = 1;
+}
+
+message SetRequest {
+  int32 value = 1;
+}
+
+message SetResponse {}
