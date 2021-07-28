@@ -4,36 +4,39 @@ use tonic::transport::Server;
 
 use super::consensus::{ConsensusModule, ConsensusServer, Entry};
 use super::entry_appender::EntryAppender;
-use super::log::Log;
+use super::log::{Log, Transition};
 
-pub struct RaftServer<L>
+#[derive(Debug, Clone)]
+pub struct RaftService<L>
 where
     L: Log<Entry, String> + 'static,
 {
-    consensus_service: ConsensusServer<ConsensusModule<L>>,
-    entry_appender: EntryAppender,
+    consensus_server: ConsensusServer<ConsensusModule<L>>,
+    consensus_module: ConsensusModule<L>,
 }
 
-impl<L> RaftServer<L>
+impl<L> RaftService<L>
 where
     L: Log<super::consensus::Entry, String>,
 {
     pub fn new(id: u64, broker_list: Vec<SocketAddr>) -> Self {
         let consensus_module = ConsensusModule::new(id, broker_list);
-        let entry_appender = consensus_module.entry_appender();
-        let consensus_service = ConsensusServer::new(consensus_module);
+        let consensus_server = ConsensusServer::new(consensus_module.clone());
 
         Self {
-            consensus_service,
-            entry_appender,
+            consensus_server,
+            consensus_module,
         }
     }
 
     pub fn router(&self) -> Router<ConsensusServer<ConsensusModule<L>>, Unimplemented> {
-        Server::builder().add_service(self.consensus_service.clone())
+        Server::builder().add_service(self.consensus_server.clone())
     }
 
-    pub fn entry_appender(&self) -> EntryAppender {
-        self.entry_appender.clone()
+    pub async fn append_transition<T>(&self, transition: &T) -> Result<(), String>
+    where
+        T: Transition,
+    {
+        self.consensus_module.append_transition(transition).await
     }
 }

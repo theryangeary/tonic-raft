@@ -1,6 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tonic_raft::log::InMemoryLog;
-use tonic_raft::server::RaftServer;
+use tonic_raft::server::RaftService;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         brokers.push(tokio::spawn(async move {
             let raft_server =
-                RaftServer::<InMemoryLog>::new(broker_num.into(), broker_socket_addrs);
+                RaftService::<InMemoryLog>::new(broker_num.into(), broker_socket_addrs);
             raft_server.router().serve(addr).await
         }));
     }

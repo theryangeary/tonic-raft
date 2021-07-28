@@ -1,5 +1,6 @@
 use crate::entry_appender::EntryAppender;
 use crate::log::Log;
+use crate::log::Transition;
 use raft::consensus_client::ConsensusClient;
 use raft::consensus_server::Consensus;
 use raft::{AppendEntriesRequest, AppendEntriesResponse, RequestVoteRequest, RequestVoteResponse};
@@ -37,7 +38,7 @@ impl Default for Role {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// Raft consensus module
 ///
 /// Struct members are broken into sections based on the raft paper, Figure 2, with an `extra`
@@ -132,8 +133,10 @@ where
                 }
 
                 let role_transition_tx = role_transition_tx2.clone();
-                let mut r = role_handle.write().await;
-                *r = role;
+                {
+                    let mut r = role_handle.write().await;
+                    *r = role;
+                }
 
                 match role {
                     Role::Follower => {
@@ -428,13 +431,27 @@ where
             log,
             match_index,
             next_index,
-            role: Arc::new(RwLock::new(Role::Follower)),
+            role,
             task_handles,
             voted_for: Arc::new(RwLock::new(None)),
             id,
             log_entry_tx_watch_tx,
             log_entry_tx_watch_rx,
         }
+    }
+
+    /// Add a replicated state machine transition to the event log
+    pub async fn append_transition<T>(&self, transition: &T) -> Result<(), String>
+    where
+        T: Transition,
+    {
+        let r = self.role.read().await;
+        let id = self.id.load(Ordering::SeqCst);
+        println!("id {} apparently {:?}", id, *r);
+        if *r != Role::Leader {
+            return Err(String::from("no, I am not leader"));
+        }
+        unimplemented!()
     }
 
     /// Set current role being performed by the server

@@ -1,8 +1,9 @@
 use serde::Serialize;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tonic::{Request, Response, Status};
+use tonic_raft::consensus::ConsensusModule;
 use tonic_raft::log::InMemoryLog;
-use tonic_raft::server::RaftServer;
+use tonic_raft::server::RaftService;
 
 use tonic_raft::entry_appender::EntryAppender;
 
@@ -25,11 +26,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 10000);
 
     let handle = tokio::spawn(async move {
-        let raft_server = RaftServer::<InMemoryLog>::new(0, broker_socket_addrs);
-        let entry_appender = raft_server.entry_appender();
+        let raft_service = RaftService::<InMemoryLog>::new(0, broker_socket_addrs);
 
-        let simple_service = SimpleService::new(entry_appender);
-        raft_server
+        let simple_service = SimpleService::new(raft_service.clone());
+
+        raft_service
             .router()
             .add_service(ValueStoreServer::new(simple_service))
             .serve(addr)
@@ -45,14 +46,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// A simple service that stores a single value
 struct SimpleService {
     value: i32,
-    entry_appender: EntryAppender,
+    raft_service: RaftService<InMemoryLog>,
 }
 
 impl SimpleService {
-    pub fn new(entry_appender: EntryAppender) -> Self {
+    pub fn new(raft_service: RaftService<InMemoryLog>) -> Self {
         Self {
             value: 0,
-            entry_appender,
+            raft_service,
         }
     }
 }
@@ -66,6 +67,8 @@ enum Transition {
     Set(i32),
 }
 
+impl tonic_raft::log::Transition for Transition {}
+
 #[tonic::async_trait]
 impl ValueStore for SimpleService {
     async fn set(&self, request: Request<SetRequest>) -> Result<Response<SetResponse>, Status> {
@@ -74,9 +77,8 @@ impl ValueStore for SimpleService {
         let inner = request.into_inner();
 
         let log_entry = Transition::Set(inner.value);
-        self.entry_appender
-            .clone()
-            .append_entry(&log_entry)
+        self.raft_service
+            .append_transition(&log_entry)
             .await
             .map_err(|e| Status::internal(e))?;
 
