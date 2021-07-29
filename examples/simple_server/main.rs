@@ -1,5 +1,9 @@
 use serde::Serialize;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use tonic::{Request, Response, Status};
 use tonic_raft::consensus::ConsensusModule;
 use tonic_raft::log::InMemoryLog;
@@ -45,16 +49,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[derive(Clone)]
 /// A simple service that stores a single value
 struct SimpleService {
-    value: i32,
+    value: Arc<AtomicU64>,
     raft_service: RaftService<InMemoryLog>,
 }
 
 impl SimpleService {
     pub fn new(raft_service: RaftService<InMemoryLog>) -> Self {
         Self {
-            value: 0,
+            value: Arc::new(AtomicU64::from(0)),
             raft_service,
         }
+    }
+
+    // TODO it might make sense to make this a method of a `RaftConsumer` trait (name up for
+    // debate)
+    async fn apply(&self, transition: Transition) -> Result<(), String> {
+        match transition {
+            Transition::Set(value) => self.value.store(value, Ordering::SeqCst),
+        }
+
+        Ok(())
     }
 }
 
@@ -64,7 +78,7 @@ impl SimpleService {
 /// machine across nodes.
 #[derive(Serialize)]
 enum Transition {
-    Set(i32),
+    Set(u64),
 }
 
 impl tonic_raft::log::Transition for Transition {}
@@ -76,12 +90,25 @@ impl ValueStore for SimpleService {
 
         let inner = request.into_inner();
 
-        let log_entry = Transition::Set(inner.value);
-        self.raft_service
-            .append_transition(&log_entry)
+        let transition = Transition::Set(inner.value);
+
+        // TODO from here until "END" could potentially be one call to a `RaftConsumer` trait
+        // method
+
+        // append_transition only returns after the transition has been replicated across a
+        // majority of nodes, meaning it is safe to apply
+        let log_index = self
+            .raft_service
+            .append_transition(&transition)
             .await
             .map_err(|e| Status::internal(e))?;
 
+        self.apply(transition)
+            .await
+            .map_err(|e| Status::internal(e))?;
+
+        self.raft_service.set_last_applied(log_index);
+        // "END"
         let reply = value_store::SetResponse {};
         Ok(Response::new(reply))
     }
@@ -89,7 +116,9 @@ impl ValueStore for SimpleService {
     async fn get(&self, request: Request<GetRequest>) -> Result<Response<GetResponse>, Status> {
         println!("Got a get request from {:?}", request.remote_addr());
 
-        let reply = value_store::GetResponse { value: self.value };
+        let reply = value_store::GetResponse {
+            value: self.value.load(Ordering::SeqCst),
+        };
         Ok(Response::new(reply))
     }
 }

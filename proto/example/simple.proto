@@ -13,11 +13,11 @@ service ValueStore {
 message GetRequest {}
 
 message GetResponse {
-  int32 value = 1;
+  uint64 value = 1;
 }
 
 message SetRequest {
-  int32 value = 1;
+  uint64 value = 1;
 }
 
 message SetResponse {}

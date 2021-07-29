@@ -61,7 +61,7 @@ where
     commit_index: Arc<AtomicU64>,
     /// index of highest log entry applied to state machine (initialized to 0, increases
     /// monotonically)
-    last_applied: u64,
+    last_applied: Arc<AtomicU64>,
     // volatile state if leader, otherwise None. Reinitialized after election.
     /// for each server, index of the next log entry to send to that server (initialized to leader
     /// last log index + 1)
@@ -316,6 +316,7 @@ where
                             }
 
                             loop {
+                                // TODO this is a busy loop, churning through CPU
                                 let last_log_index = log_handle3.last_index().await;
 
                                 for (broker_socket_addr, next_index) in
@@ -427,7 +428,7 @@ where
             current_term,
             election_timeout_reset_tx,
             role_transition_tx,
-            last_applied: 0,
+            last_applied: Arc::new(AtomicU64::from(0)),
             log,
             match_index,
             next_index,
@@ -441,17 +442,29 @@ where
     }
 
     /// Add a replicated state machine transition to the event log
-    pub async fn append_transition<T>(&self, transition: &T) -> Result<(), String>
+    pub async fn append_transition<T>(&self, transition: &T) -> Result<u64, String>
     where
         T: Transition,
     {
-        let r = self.role.read().await;
-        let id = self.id.load(Ordering::SeqCst);
-        println!("id {} apparently {:?}", id, *r);
-        if *r != Role::Leader {
-            return Err(String::from("no, I am not leader"));
+        {
+            // only append if leader - otherwise the client should be redirected to the leader
+            // (TODO)
+            let r = self.role.read().await;
+            if *r != Role::Leader {
+                return Err(String::from("no, I am not leader"));
+            }
         }
-        unimplemented!()
+
+        let log_index = self
+            .log
+            .append(Entry {
+                term: self.current_term.load(Ordering::SeqCst),
+                data: bincode::serialize(transition).map_err(|e| e.to_string())?,
+            })
+            .await?;
+        // TODO only return once transition is replicated to a majority
+        // TODO call set_commit_index(log_index) after replicating to majority
+        Ok(log_index)
     }
 
     /// Set current role being performed by the server
@@ -488,6 +501,21 @@ where
     /// This should be used over manually calling `AtomicU64::store`
     fn set_commit_index(&self, new_commit_index: u64) {
         self.commit_index.store(new_commit_index, Ordering::SeqCst);
+    }
+
+    /// Get current last_applied
+    ///
+    /// This function loads an atomic, so callers should store the result as a local variable to
+    /// reduce contention unless callers require the atomicity.
+    fn last_applied(&self) -> u64 {
+        self.last_applied.load(Ordering::SeqCst)
+    }
+
+    /// Set current last_applied
+    ///
+    /// This should be used over manually calling `AtomicU64::store`
+    pub fn set_last_applied(&self, new_last_applied: u64) {
+        self.last_applied.store(new_last_applied, Ordering::SeqCst);
     }
 
     /// Check if the term from an incoming RPC is higher than the previous highest known term, and
