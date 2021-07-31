@@ -1,4 +1,3 @@
-use crate::entry_appender::EntryAppender;
 use crate::log::Log;
 use crate::log::Transition;
 use raft::consensus_client::ConsensusClient;
@@ -119,7 +118,6 @@ where
         let next_index_handle = Arc::clone(&next_index);
         let match_index_handle = Arc::clone(&match_index);
         let task_handles_handle = Arc::clone(&task_handles);
-        let log_entry_tx_watch_tx_handle = Arc::clone(&log_entry_tx_watch_tx);
 
         let _role_transition_task = tokio::spawn(async move {
             while let Some(role) = role_transition_rx.recv().await {
@@ -528,14 +526,6 @@ where
             self.set_current_term(rpc_term);
             self.set_role(Role::Follower).await;
         }
-    }
-
-    /// Get EntryAppender, for leader to append logs with
-    pub fn entry_appender(&self) -> EntryAppender {
-        EntryAppender::new(
-            Arc::clone(&self.current_term),
-            self.log_entry_tx_watch_rx.clone(),
-        )
     }
 }
 

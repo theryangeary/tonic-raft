@@ -4,8 +4,7 @@ use tonic::transport::server::{Router, Unimplemented};
 use tonic::transport::Server;
 
 use super::consensus::{ConsensusModule, ConsensusServer, Entry};
-use super::entry_appender::EntryAppender;
-use super::log::{Log, Transition};
+use super::log::Log;
 
 #[derive(Debug, Clone)]
 pub struct RaftService<L>
