@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
+use std::sync::{atomic::AtomicU64, Arc};
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::sync::{broadcast, mpsc};
@@ -54,7 +51,7 @@ where
 
         let _role_transition_task = tokio::spawn(async move {
             while let Some(role) = role_transition_rx.recv().await {
-                println!("{:?} becoming {:?}", s.id.load(Ordering::SeqCst), role);
+                println!("{:?} becoming {:?}", s.id(), role);
                 // close any tasks associated with the previous role
                 {
                     let mut task_handles = s.task_handles.write().await;
@@ -115,8 +112,8 @@ where
                             };
 
                             let request = Request::new(RequestVoteRequest {
-                                term: s.current_term.load(Ordering::SeqCst),
-                                candidate_id: s.id.load(Ordering::SeqCst),
+                                term: s.current_term(),
+                                candidate_id: s.id(),
                                 last_log_index: s.log.last_index().await,
                                 last_log_term: s.log.last_term().await,
                             });
@@ -127,12 +124,12 @@ where
                                 votes += 1;
                             }
                         }
-                        println!("broker {} got {} votes", s.id.load(Ordering::SeqCst), votes);
+                        println!("broker {} got {} votes", s.id(), votes);
                         if votes >= votes_needed_to_become_leader {
                             println!(
                                 "broker {} becomes the leader for term {}",
-                                s.id.load(Ordering::SeqCst),
-                                s.current_term.load(Ordering::SeqCst)
+                                s.id(),
+                                s.current_term()
                             );
                             if let Err(e) = s.become_role(Role::Leader).await {
                                 eprintln!("failed to send role transition request: {:?}", e);
@@ -173,12 +170,12 @@ where
 
                                     let request = {
                                         Request::new(AppendEntriesRequest {
-                                            term: s2.current_term.load(Ordering::SeqCst),
-                                            leader_id: s2.id.load(Ordering::SeqCst),
+                                            term: s2.current_term(),
+                                            leader_id: s2.id(),
                                             prev_log_index,
                                             prev_log_term,
                                             entries: vec![],
-                                            leader_commit: s2.commit_index.load(Ordering::SeqCst),
+                                            leader_commit: s2.commit_index(),
                                         })
                                     };
 
@@ -198,7 +195,7 @@ where
                         // yield now to promote starting the heartbeat task sooner, and reducing
                         // the likelihood of leader contention and producing multiple elections
                         // back to back
-                        tokio::task::yield_now();
+                        tokio::task::yield_now().await;
 
                         {
                             s.task_handles.write().await.push(heartbeat_task);
@@ -303,7 +300,7 @@ where
 
                             loop {
                                 // TODO this is busy loop, churning CPU
-                                let n = s2.commit_index.load(Ordering::SeqCst) + 1;
+                                let n = s2.commit_index() + 1;
                                 let num_matching = s2
                                     .match_index
                                     .read()
@@ -318,9 +315,7 @@ where
                                     continue;
                                 };
 
-                                if num_matching >= majority_count
-                                    && log_term == s2.current_term.load(Ordering::SeqCst)
-                                {
+                                if num_matching >= majority_count && log_term == s2.current_term() {
                                     s2.set_commit_index(n);
                                 }
 

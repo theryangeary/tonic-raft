@@ -158,6 +158,16 @@ where
         self.id.load(Ordering::SeqCst)
     }
 
+    async fn reset_election_timeout(&self) -> Result<(), broadcast::error::SendError<()>> {
+        if self.role().await == Role::Follower
+            && self.election_timeout_reset_tx.receiver_count() > 0
+        {
+            self.election_timeout_reset_tx.send(())?;
+        }
+
+        Ok(())
+    }
+
     /// Check if the term from an incoming RPC is higher than the previous highest known term, and
     /// update accordingly
     ///

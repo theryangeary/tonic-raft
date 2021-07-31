@@ -1,10 +1,12 @@
-use tonic::{Request, Response, Status};
-use std::sync::atomic::Ordering;
 use std::convert::TryInto;
+use std::sync::atomic::Ordering;
+use tonic::{Request, Response, Status};
 
-use crate::{Role, Log, Entry, ConsensusModule};
 use crate::raft::consensus_server::Consensus;
-use crate::raft::{AppendEntriesRequest, AppendEntriesResponse, RequestVoteRequest, RequestVoteResponse};
+use crate::raft::{
+    AppendEntriesRequest, AppendEntriesResponse, RequestVoteRequest, RequestVoteResponse,
+};
+use crate::{ConsensusModule, Entry, Log, Role};
 
 #[tonic::async_trait]
 impl<L> Consensus for ConsensusModule<L>
@@ -45,11 +47,12 @@ where
         }
 
         // reset election timeout
-        if *self.role.read().await == Role::Follower
-            && self.election_timeout_reset_tx.receiver_count() > 0
-        {
-            self.election_timeout_reset_tx.send(()).unwrap();
-        }
+        self.reset_election_timeout().await.map_err(|e| {
+            Status::internal(format!(
+                "Append entries RPC failed to reset election timeout: {:?}",
+                e
+            ))
+        })?;
 
         // reply false if log doesn't contain an entry at prev_log_index whose term matches
         // prev_log_term
@@ -120,7 +123,16 @@ where
                 && inner.last_log_term >= self.log.last_term().await)
         {
             voted_for.insert(inner.candidate_id);
-            println!("granting vote for term {} to {}", current_term, inner.candidate_id);
+            self.reset_election_timeout().await.map_err(|e| {
+                Status::internal(format!(
+                    "Request vote RPC failed to reset election timeout: {:?}",
+                    e
+                ))
+            })?;
+            println!(
+                "granting vote for term {} to {}",
+                current_term, inner.candidate_id
+            );
             return Ok(vote(true));
         } else {
             return Ok(vote(false));
