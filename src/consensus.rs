@@ -167,9 +167,15 @@ where
                         // TODO make these requests in parallel and short circuit on majority
                         for broker in &*broker_list {
                             // request vote, increment vote count on success
-                            let mut client = ConsensusClient::connect(format!("http://{}", broker))
-                                .await
-                                .unwrap();
+                            let client_result =
+                                ConsensusClient::connect(format!("http://{}", broker)).await;
+
+                            let mut client = if let Err(e) = client_result {
+                                eprintln!("failed to connect to broker: {:?}", e);
+                                continue;
+                            } else {
+                                client_result.unwrap()
+                            };
 
                             let request = Request::new(RequestVoteRequest {
                                 term: current_term_handle.load(Ordering::SeqCst),
@@ -194,9 +200,13 @@ where
                                 "broker {} becomes the leader",
                                 id_handle.load(Ordering::SeqCst)
                             );
-                            let _send_result = role_transition_tx.send(Role::Leader).await;
+                            if let Err(e) = role_transition_tx.send(Role::Leader).await {
+                                eprintln!("failed to send role transition request: {:?}", e);
+                            }
                         } else {
-                            let _send_result = role_transition_tx.send(Role::Follower).await;
+                            if let Err(e) = role_transition_tx.send(Role::Follower).await {
+                                eprintln!("failed to send role transition request: {:?}", e);
+                            }
                         }
                     }
                     Role::Leader => {
@@ -223,12 +233,18 @@ where
                                 let prev_log_term = log_handle1.last_term().await;
 
                                 for broker_socket_addr in &*heartbeat_broker_list.read().await {
-                                    let mut client = ConsensusClient::connect(format!(
+                                    let client_result = ConsensusClient::connect(format!(
                                         "http://{}",
                                         broker_socket_addr
                                     ))
-                                    .await
-                                    .unwrap();
+                                    .await;
+
+                                    let mut client = if let Err(e) = client_result {
+                                        eprintln!("failed to connect to broker: {:?}", e);
+                                        continue;
+                                    } else {
+                                        client_result.unwrap()
+                                    };
 
                                     let request = {
                                         Request::new(AppendEntriesRequest {
@@ -321,6 +337,10 @@ where
                                     next_index_handle.write().await.iter_mut()
                                 {
                                     if last_log_index >= *next_index {
+                                        println!(
+                                            "sending to broker_socket_addr {}",
+                                            broker_socket_addr
+                                        );
                                         let mut client = ConsensusClient::connect(format!(
                                             "http://{}",
                                             broker_socket_addr
@@ -453,6 +473,7 @@ where
             }
         }
 
+        println!("Appending transition: {:?}", transition);
         let log_index = self
             .log
             .append(Entry {
@@ -562,7 +583,9 @@ where
 
         // if AppendEntries rpc received from new leader, convert to follower
         if *self.role.read().await == Role::Candidate {
-            let _send_result = self.role_transition_tx.send(Role::Follower).await;
+            if let Err(e) = self.role_transition_tx.send(Role::Follower).await {
+                eprintln!("Failed to send role transition message: {:?}", e);
+            }
         }
 
         // reset election timeout
@@ -596,6 +619,9 @@ where
             let _entry = self.log.pop().await;
         }
 
+        if inner.entries.len() > 0 {
+            println!("Appending {:?}", inner.entries);
+        }
         if let Err(e) = self.log.extend(inner.entries).await {
             println!("Error encountered adding entries to log: {}", e);
             return Ok(response(false));
