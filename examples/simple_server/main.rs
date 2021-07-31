@@ -20,17 +20,36 @@ use value_store::{GetRequest, GetResponse, SetRequest, SetResponse};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+
     let mut broker_socket_addrs = vec![];
     broker_socket_addrs.push(SocketAddr::new(
         IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
         10000,
     ));
+    broker_socket_addrs.push(SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        10001,
+    ));
+    broker_socket_addrs.push(SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        10002,
+    ));
+    broker_socket_addrs.push(SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        10003,
+    ));
+    broker_socket_addrs.push(SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        10004,
+    ));
 
+    let port = args[1].parse().unwrap();
     // create this broker's socket address
-    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 10000);
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
 
     let handle = tokio::spawn(async move {
-        let raft_service = RaftService::<InMemoryLog>::new(0, broker_socket_addrs);
+        let raft_service = RaftService::<InMemoryLog>::new(port.into(), broker_socket_addrs);
 
         let simple_service = SimpleService::new(raft_service.clone());
 
@@ -76,7 +95,7 @@ impl SimpleService {
 ///
 /// This is the datatype that will be saved entries in the event log for replicating the state
 /// machine across nodes.
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 enum Transition {
     Set(u64),
 }

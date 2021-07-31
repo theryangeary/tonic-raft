@@ -13,17 +13,18 @@ pub mod value_store {
 pub async fn main() {
     let args: Vec<String> = std::env::args().collect();
 
+    let port = &args[1];
     // expect "set" or "get" as a command line argument
-    let command = &args[1];
+    let command = &args[2];
 
     // create a client to make RPCs to the server
-    let mut client = ValueStoreClient::connect("http://127.0.0.1:10000")
+    let mut client = ValueStoreClient::connect(format!("http://127.0.0.1:{}", port))
         .await
         .unwrap();
 
     if command == "set" {
         // read the value to set the server's store value to
-        let value = &args[2].parse().unwrap();
+        let value = &args[3].parse().unwrap();
         // construct the RPC request
         let request = tonic::Request::new(SetRequest { value: *value });
         // make the RPC

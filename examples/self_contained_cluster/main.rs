@@ -5,7 +5,7 @@ use tonic_raft::server::RaftService;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut brokers = vec![];
-    let num_brokers = 5;
+    let num_brokers = 3;
     let first_port = 10000;
 
     for broker_num in 0..num_brokers {
