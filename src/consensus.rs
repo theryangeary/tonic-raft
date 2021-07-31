@@ -272,34 +272,6 @@ where
 
                         task_handles.push(heartbeat_task);
 
-                        // If command received from client: append entry to local log, respond
-                        let log_entry_tx_watch_tx_handle =
-                            Arc::clone(&log_entry_tx_watch_tx_handle);
-                        let log_handle2 = log_handle.clone();
-                        let commit_index = Arc::clone(&commit_index_handle);
-                        let service_task = tokio::spawn(async move {
-                            println!("starting servicing client");
-                            let (log_entry_tx, mut log_entry_rx) = mpsc::channel(1);
-                            let _send_result = log_entry_tx_watch_tx_handle
-                                .send(log_entry_tx)
-                                .expect("Failed to send log_entry_tx");
-
-                            while let Some(entry) = log_entry_rx.recv().await {
-                                println!("recv'd entry: {:?}", entry);
-                                // append to log
-                                let index = log_handle2.append(entry).await.unwrap();
-                                // TODO replicate to a majority of logs
-                                // for now by just waiting until commit_index is at least as high
-                                // as this log's index
-                                while index > commit_index.load(Ordering::SeqCst) {
-                                    tokio::task::yield_now().await;
-                                }
-                                // TODO apply to state machine
-                            }
-                        });
-
-                        task_handles.push(service_task);
-
                         // if last log index > nextIndex for a follower, send AppendEntries rpc
                         let append_entries_broker_list = Arc::clone(&brokers_handle);
                         let log_handle3 = log_handle.clone();
@@ -386,6 +358,8 @@ where
                                         }
                                     }
                                 }
+
+                                tokio::task::yield_now().await;
                             }
                         });
 
@@ -406,6 +380,7 @@ where
                                 { update_commit_index_broker_list.read().await.len() / 2 + 1 };
 
                             loop {
+                                // TODO this is busy loop, churning CPU
                                 let n = commit_index.load(Ordering::SeqCst) + 1;
                                 let num_matching = match_indexes
                                     .read()
@@ -425,6 +400,8 @@ where
                                 {
                                     commit_index.store(n, Ordering::SeqCst);
                                 }
+
+                                tokio::task::yield_now().await;
                             }
                         });
 
