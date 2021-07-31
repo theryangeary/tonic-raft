@@ -5,11 +5,8 @@ use std::sync::{
     Arc,
 };
 use tonic::{Request, Response, Status};
-use tonic_raft::consensus::ConsensusModule;
 use tonic_raft::log::InMemoryLog;
 use tonic_raft::server::RaftService;
-
-use tonic_raft::entry_appender::EntryAppender;
 
 pub mod value_store {
     tonic::include_proto!("valuestore");
@@ -34,14 +31,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     broker_socket_addrs.push(SocketAddr::new(
         IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
         10002,
-    ));
-    broker_socket_addrs.push(SocketAddr::new(
-        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-        10003,
-    ));
-    broker_socket_addrs.push(SocketAddr::new(
-        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-        10004,
     ));
 
     let port = args[1].parse().unwrap();
