@@ -3,8 +3,7 @@ use std::ops::Deref;
 use tonic::transport::server::{Router, Unimplemented};
 use tonic::transport::Server;
 
-use super::consensus::{ConsensusModule, ConsensusServer, Entry};
-use super::log::Log;
+use crate::{ConsensusModule, ConsensusServer, Entry, Log};
 
 #[derive(Debug, Clone)]
 pub struct RaftService<L>
@@ -16,7 +15,7 @@ where
 
 impl<L> RaftService<L>
 where
-    L: Log<super::consensus::Entry, String>,
+    L: Log<crate::Entry, String>,
 {
     pub fn new(id: u64, broker_list: Vec<SocketAddr>) -> Self {
         let consensus_module = ConsensusModule::new(id, broker_list);
@@ -31,7 +30,7 @@ where
 
 impl<L> Deref for RaftService<L>
 where
-    L: Log<super::consensus::Entry, String>,
+    L: Log<crate::Entry, String>,
 {
     type Target = ConsensusModule<L>;
 
