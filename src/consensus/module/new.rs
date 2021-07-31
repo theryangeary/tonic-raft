@@ -195,6 +195,11 @@ where
                             }
                         });
 
+                        // yield now to promote starting the heartbeat task sooner, and reducing
+                        // the likelihood of leader contention and producing multiple elections
+                        // back to back
+                        tokio::task::yield_now();
+
                         {
                             s.task_handles.write().await.push(heartbeat_task);
                         }
