@@ -91,6 +91,11 @@ where
         Ok(log_index)
     }
 
+    /// Get current role
+    async fn role(&self) -> Role {
+        *self.role.read().await
+    }
+
     /// Set current role being performed by the server
     ///
     /// N.B. that this only stores the value of the role, it does not begin the processes that should
@@ -115,18 +120,13 @@ where
 
     /// Set current term
     ///
-    /// This should be used over manually calling `AtomicU64::store`. It should also only be used in
-    /// cases where the current term must specifically be set to a given value. In the happy case of
-    /// incrementing the current term by one, use `increment_current_term`.
+    /// This should be used over manually calling `AtomicU64::store`.
     async fn set_current_term(&self, new_term: u64) {
+        let _previous_voted_for = self.voted_for.write().await.take();
         self.current_term.store(new_term, Ordering::SeqCst);
     }
 
     /// Increment current term
-    ///
-    /// This should typically be used when incrementing `current_term`, instead of using
-    /// `set_current_term`, because incrementing usually happens in the happy/error free case, in which
-    /// case votes must be reset
     async fn increment_current_term(&self) {
         let _previous_voted_for = self.voted_for.write().await.take();
         self.current_term.fetch_add(1, Ordering::SeqCst);
@@ -174,8 +174,12 @@ where
     async fn term_check(&self, rpc_term: u64) {
         if rpc_term > self.current_term() {
             self.set_current_term(rpc_term).await;
-            println!("received RPC with term > self.current_term, reverting to follower");
-            self.set_role(Role::Follower).await;
+            if self.role().await != Role::Follower {
+                println!("received RPC with term > self.current_term, reverting to follower");
+                if let Err(e) = self.become_role(Role::Follower).await {
+                    println!("Failed to become Follower: {:?}", e);
+                }
+            }
         }
     }
 }

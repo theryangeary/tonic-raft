@@ -63,6 +63,8 @@ where
                     }
                 }
 
+                s.set_role(role).await;
+
                 match role {
                     Role::Follower => {
                         // set thread to handle election timeout
