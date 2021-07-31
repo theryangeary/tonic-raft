@@ -1,5 +1,4 @@
 use std::convert::TryInto;
-use std::sync::atomic::Ordering;
 use tonic::{Request, Response, Status};
 
 use crate::raft::consensus_server::Consensus;
@@ -30,7 +29,7 @@ where
         };
 
         // just say we're good because we are already the leader
-        if self.id.load(Ordering::SeqCst) == inner.leader_id {
+        if self.id() == inner.leader_id {
             return Ok(response(true));
         }
 
@@ -40,14 +39,14 @@ where
         }
 
         // if AppendEntries rpc received from new leader, convert to follower
-        if *self.role.read().await == Role::Candidate {
-            if let Err(e) = self.role_transition_tx.send(Role::Follower).await {
+        if self.role().await == Role::Candidate {
+            if let Err(e) = self.become_role(Role::Follower).await {
                 eprintln!("Failed to send role transition message: {:?}", e);
             }
         }
 
         // reset election timeout
-        self.reset_election_timeout().await.map_err(|e| {
+        let _: () = self.reset_election_timeout().await.map_err(|e| {
             Status::internal(format!(
                 "Append entries RPC failed to reset election timeout: {:?}",
                 e
@@ -122,7 +121,6 @@ where
             && (inner.last_log_index >= self.log.last_index().await
                 && inner.last_log_term >= self.log.last_term().await)
         {
-            voted_for.insert(inner.candidate_id);
             self.reset_election_timeout().await.map_err(|e| {
                 Status::internal(format!(
                     "Request vote RPC failed to reset election timeout: {:?}",
@@ -133,6 +131,7 @@ where
                 "granting vote for term {} to {}",
                 current_term, inner.candidate_id
             );
+            voted_for.insert(inner.candidate_id);
             return Ok(vote(true));
         } else {
             return Ok(vote(false));
