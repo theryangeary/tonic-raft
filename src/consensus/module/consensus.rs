@@ -120,6 +120,7 @@ where
                 && inner.last_log_term >= self.log.last_term().await)
         {
             voted_for.insert(inner.candidate_id);
+            println!("granting vote for term {} to {}", current_term, inner.candidate_id);
             return Ok(vote(true));
         } else {
             return Ok(vote(false));
