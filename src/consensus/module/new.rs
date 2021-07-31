@@ -63,7 +63,11 @@ where
                     }
                 }
 
-                s.set_role(role).await;
+                {
+                    // set role
+                    let mut r = s.role.write().await;
+                    *r = role;
+                }
 
                 match role {
                     Role::Follower => {

@@ -96,15 +96,6 @@ where
         *self.role.read().await
     }
 
-    /// Set current role being performed by the server
-    ///
-    /// N.B. that this only stores the value of the role, it does not begin the processes that should
-    /// run when acting as that role. See `role_transition_tx` and `become_role` for that.
-    async fn set_role(&self, new_role: Role) {
-        let mut r = self.role.write().await;
-        *r = new_role;
-    }
-
     /// Become role and start behavior accordingly
     async fn become_role(&self, new_role: Role) -> Result<(), mpsc::error::SendError<Role>> {
         self.role_transition_tx.send(new_role).await
