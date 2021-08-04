@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future;
 use std::net::SocketAddr;
 use std::sync::{atomic::AtomicU64, Arc};
 use std::time::Duration;
@@ -11,6 +12,8 @@ use tonic::Request;
 use crate::raft::consensus_client::ConsensusClient;
 use crate::raft::{AppendEntriesRequest, RequestVoteRequest};
 use crate::{ConsensusModule, Entry, Log, Role};
+
+use futures::StreamExt;
 
 impl<L> ConsensusModule<L>
 where
@@ -94,38 +97,46 @@ where
                         // increment current_term
                         s.increment_current_term().await;
 
+                        let votes_needed_to_become_leader = s.num_brokers().await / 2 + 1;
+
+                        let sc = s.clone();
                         // request votes from other servers
-                        let broker_list = s.brokers.read().await;
-                        let votes_needed_to_become_leader = broker_list.len() / 2 + 1;
-                        let mut votes = 0;
-                        // TODO make these requests in parallel and short circuit on majority
-                        for broker in &*broker_list {
-                            // request vote, increment vote count on success
-                            let client_result =
-                                ConsensusClient::connect(format!("http://{}", broker)).await;
+                        let votes_received = s
+                            .for_each_broker(|broker| async move {
+                                // request vote, increment vote count on success
+                                let mut client =
+                                    ConsensusClient::connect(format!("http://{}", broker))
+                                        .await
+                                        .map_err(|e| format!("failed to connect: {:?}", e))?;
 
-                            let mut client = if let Err(e) = client_result {
-                                eprintln!("failed to connect to broker: {:?}", e);
-                                continue;
-                            } else {
-                                client_result.unwrap()
-                            };
+                                let request = Request::new(RequestVoteRequest {
+                                    term: sc.current_term(),
+                                    candidate_id: sc.id(),
+                                    last_log_index: sc.log.last_index().await,
+                                    last_log_term: sc.log.last_term().await,
+                                });
 
-                            let request = Request::new(RequestVoteRequest {
-                                term: s.current_term(),
-                                candidate_id: s.id(),
-                                last_log_index: s.log.last_index().await,
-                                last_log_term: s.log.last_term().await,
-                            });
+                                client
+                                    .request_vote(request)
+                                    .await
+                                    .map_err(|e| format!("failed to run request_vote RPC: {:?}", e))
+                            })
+                            .await
+                            .filter(|response| match response {
+                                Ok(request_vote_response) => {
+                                    future::ready(request_vote_response.get_ref().vote_granted)
+                                }
+                                Err(e) => {
+                                    eprintln!("{:?}", e);
+                                    future::ready(false)
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .await
+                            .len();
 
-                            let response = client.request_vote(request).await.unwrap();
-                            let inner = response.into_inner();
-                            if inner.vote_granted {
-                                votes += 1;
-                            }
-                        }
-                        println!("broker {} got {} votes", s.id(), votes);
-                        if votes >= votes_needed_to_become_leader {
+                        println!("broker {} got {} votes", s.id(), votes_received);
+                        if votes_received >= votes_needed_to_become_leader {
                             println!(
                                 "broker {} becomes the leader for term {}",
                                 s.id(),
@@ -151,40 +162,47 @@ where
                                 tokio::time::interval(tokio::time::Duration::from_millis(100));
 
                             loop {
-                                let prev_log_index = s2.log.last_index().await;
-                                let prev_log_term = s2.log.last_term().await;
+                                let sc = s2.clone();
 
-                                for broker_socket_addr in &*s2.brokers.read().await {
-                                    let client_result = ConsensusClient::connect(format!(
-                                        "http://{}",
-                                        broker_socket_addr
-                                    ))
+                                let mut stream = s2
+                                    .for_each_broker(|broker| async move {
+                                        let mut client =
+                                            ConsensusClient::connect(format!("http://{}", broker))
+                                                .await
+                                                .map_err(|e| {
+                                                    format!("failed to connect; {:?}", e)
+                                                })?;
+
+                                        let request = {
+                                            Request::new(AppendEntriesRequest {
+                                                term: sc.current_term(),
+                                                leader_id: sc.id(),
+                                                prev_log_index: sc.log.last_index().await,
+                                                prev_log_term: sc.log.last_term().await,
+                                                entries: vec![],
+                                                leader_commit: sc.commit_index(),
+                                            })
+                                        };
+
+                                        if let Err(response_error) =
+                                            client.append_entries(request).await
+                                        {
+                                            // TODO why is this "Ok"?
+                                            if response_error.code() != tonic::Code::Cancelled {
+                                                eprintln!("Error: {:?}", response_error);
+                                                return Ok(());
+                                            } else {
+                                                return Err(response_error.to_string());
+                                            }
+                                        }
+
+                                        Ok(())
+                                    })
                                     .await;
 
-                                    let mut client = if let Err(e) = client_result {
-                                        eprintln!("failed to connect to broker: {:?}", e);
-                                        continue;
-                                    } else {
-                                        client_result.unwrap()
-                                    };
-
-                                    let request = {
-                                        Request::new(AppendEntriesRequest {
-                                            term: s2.current_term(),
-                                            leader_id: s2.id(),
-                                            prev_log_index,
-                                            prev_log_term,
-                                            entries: vec![],
-                                            leader_commit: s2.commit_index(),
-                                        })
-                                    };
-
-                                    if let Err(response_error) =
-                                        client.append_entries(request).await
-                                    {
-                                        if response_error.code() != tonic::Code::Cancelled {
-                                            eprintln!("Error: {:?}", response_error);
-                                        }
+                                while let Some(result) = stream.next().await {
+                                    if let Err(e) = result {
+                                        eprintln!("{:?}", e);
                                     }
                                 }
 

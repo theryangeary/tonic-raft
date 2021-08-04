@@ -1,4 +1,6 @@
+use futures::stream::Stream;
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -7,6 +9,7 @@ use std::sync::{
 use tokio::sync::RwLock;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::log::Transition;
 use crate::{Entry, Log, Role};
@@ -182,5 +185,39 @@ where
                 }
             }
         }
+    }
+
+    /// Get number of brokers meant to be in cluster
+    async fn num_brokers(&self) -> usize {
+        self.brokers.read().await.len()
+    }
+
+    /// Perform the same operation for each broker, in parallel, and return the results as a
+    /// stream, on a first-complete-first-returned basis
+    async fn for_each_broker<F, Fut, T, E>(&self, op: F) -> impl Stream<Item = Result<T, E>>
+    where
+        E: std::fmt::Debug + Send + 'static,
+        T: std::fmt::Debug + Send + 'static,
+        F: FnOnce(SocketAddr) -> Fut + Send + 'static + Clone,
+        Fut: Future<Output = Result<T, E>> + Send,
+    {
+        let broker_list = self.brokers.read().await;
+        let mut handle_list = Vec::new();
+        let (tx, rx) = mpsc::channel(broker_list.len());
+
+        for b in &*broker_list {
+            let broker = b.clone();
+            let t = tx.clone();
+            let opc = op.clone();
+            let handle = tokio::spawn(async move {
+                let result = opc(broker).await;
+                if let Err(e) = t.send(result).await {
+                    eprintln!("Failed to send result to stream, receiver hung up: {:?}", e);
+                }
+            });
+            handle_list.push(handle);
+        }
+
+        return ReceiverStream::new(rx);
     }
 }
