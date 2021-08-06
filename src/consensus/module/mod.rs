@@ -1,5 +1,4 @@
-use futures::stream::Stream;
-use std::collections::HashMap;
+use futures::stream::{Stream, StreamExt};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{
@@ -10,8 +9,11 @@ use tokio::sync::RwLock;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
+use tonic::Request;
 
+use crate::consensus::ClusterMember;
 use crate::log::Transition;
+use crate::raft::{consensus_client::ConsensusClient, AppendEntriesRequest};
 use crate::{Entry, Log, Role};
 
 mod consensus;
@@ -41,20 +43,13 @@ where
     /// index of highest log entry applied to state machine (initialized to 0, increases
     /// monotonically)
     last_applied: Arc<AtomicU64>,
-    // volatile state if leader, otherwise None. Reinitialized after election.
-    /// for each server, index of the next log entry to send to that server (initialized to leader
-    /// last log index + 1)
-    next_index: Arc<RwLock<HashMap<SocketAddr, u64>>>,
-    /// for each server, index of highest log entry known to be replicated on server (initialized
-    /// to 0, increases monotonically)
-    match_index: Arc<RwLock<HashMap<SocketAddr, u64>>>,
     // extra
     /// id of this raft broker
     id: Arc<AtomicU64>,
     /// role this server is currently acting in
     role: Arc<RwLock<Role>>,
     /// list of brokers in cluster
-    brokers: Arc<RwLock<Vec<SocketAddr>>>,
+    cluster_members: Arc<RwLock<Vec<ClusterMember>>>,
     /// handles for tasks
     task_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
     /// channel to reset election timeout
@@ -68,6 +63,9 @@ where
     L: Log<Entry, String> + 'static,
 {
     /// Add a replicated state machine transition to the event log
+    ///
+    /// Returns Ok(n) if the transition is added to the log and the log entry is replicated to a
+    /// majority of cluster members. n is the index of the new log entry.
     pub async fn append_transition<T>(&self, transition: &T) -> Result<u64, String>
     where
         T: Transition,
@@ -90,6 +88,48 @@ where
             })
             .await?;
         // TODO only return once transition is replicated to a majority
+        let sc = self.clone();
+        let mut append_entries_results_stream = self
+            .for_each_cluster_member(|cluster_member| async move {
+                // append entries
+                let mut client =
+                    ConsensusClient::connect(format!("http://{}", cluster_member.socket_address()))
+                        .await
+                        .map_err(|e| format!("failed to connect: {:?}", e))?;
+
+                let request = {
+                    // TODO set values properly
+                    Request::new(AppendEntriesRequest {
+                        term: sc.current_term(),
+                        leader_id: sc.id(),
+                        prev_log_index: sc.log.last_index().await,
+                        prev_log_term: sc.log.last_term().await,
+                        entries: vec![],
+                        leader_commit: sc.commit_index(),
+                    })
+                };
+
+                // TODO retry until the follower is up to date
+                return match client.append_entries(request).await {
+                    Ok(_) => Ok(()),
+                    Err(response_error) => Err(response_error.to_string()),
+                };
+            })
+            .await
+            .filter_map(|result| match result {
+                Err(e) => {
+                    eprintln!("failed to append entries: {:?}", e);
+                    None
+                }
+                Ok(t) => Some(t),
+            });
+
+        while let Some(append_entry_result) = append_entries_results_stream.next().await {
+            // TODO do something
+        }
+
+        //TODO if a majority were successful, udpate commit index
+
         // TODO call set_commit_index(log_index) after replicating to majority
         Ok(log_index)
     }
@@ -189,28 +229,48 @@ where
 
     /// Get number of brokers meant to be in cluster
     async fn num_brokers(&self) -> usize {
-        self.brokers.read().await.len()
+        self.cluster_members.read().await.len()
     }
 
-    /// Perform the same operation for each broker, in parallel, and return the results as a
-    /// stream, on a first-complete-first-returned basis
-    async fn for_each_broker<F, Fut, T, E>(&self, op: F) -> impl Stream<Item = Result<T, E>>
+    /// Get number of brokers needed as a minimum to constitute a majority
+    async fn majority(&self) -> usize {
+        self.cluster_members.read().await.len() / 2 + 1
+    }
+
+    /// Get cluster_members
+    async fn cluster_members(&self) -> Vec<ClusterMember> {
+        self.cluster_members.read().await.to_vec()
+    }
+
+    /// Get Iterator over socket addresses of all cluster members
+    async fn cluster_member_socket_addresses(&self) -> Vec<SocketAddr> {
+        self.cluster_members
+            .read()
+            .await
+            .iter()
+            .map(ClusterMember::socket_address)
+            .collect()
+    }
+
+    /// Perform the same operation for each broker, in parallel (in new tasks), and return the
+    /// results as a stream, on a first-complete-first-returned basis
+    async fn for_each_cluster_member<F, Fut, T, E>(&self, op: F) -> impl Stream<Item = Result<T, E>>
     where
         E: std::fmt::Debug + Send + 'static,
         T: std::fmt::Debug + Send + 'static,
-        F: FnOnce(SocketAddr) -> Fut + Send + 'static + Clone,
+        F: FnOnce(ClusterMember) -> Fut + Send + 'static + Clone,
         Fut: Future<Output = Result<T, E>> + Send,
     {
-        let broker_list = self.brokers.read().await;
+        let cluster_member_list = self.cluster_members().await;
         let mut handle_list = Vec::new();
-        let (tx, rx) = mpsc::channel(broker_list.len());
+        let (tx, rx) = mpsc::channel(cluster_member_list.len());
 
-        for b in &*broker_list {
-            let broker = b.clone();
+        for b in &*cluster_member_list {
+            let cluster_member = b.clone();
             let t = tx.clone();
             let opc = op.clone();
             let handle = tokio::spawn(async move {
-                let result = opc(broker).await;
+                let result = opc(cluster_member).await;
                 if let Err(e) = t.send(result).await {
                     eprintln!("Failed to send result to stream, receiver hung up: {:?}", e);
                 }
