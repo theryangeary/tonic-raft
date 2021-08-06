@@ -1,19 +1,22 @@
 use serde::Serialize;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 use tonic::{Request, Response, Status};
-use tonic_raft::log::InMemoryLog;
-use tonic_raft::server::RaftService;
+use tonic_raft::{log::InMemoryLog, server::RaftService};
 
 pub mod value_store {
     tonic::include_proto!("valuestore");
 }
 
-use value_store::value_store_server::{ValueStore, ValueStoreServer};
-use value_store::{GetRequest, GetResponse, SetRequest, SetResponse};
+use value_store::{
+    value_store_server::{ValueStore, ValueStoreServer},
+    GetRequest, GetResponse, SetRequest, SetResponse,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

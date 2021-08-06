@@ -1,7 +1,9 @@
-use std::net::SocketAddr;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 #[derive(Debug, Clone)]

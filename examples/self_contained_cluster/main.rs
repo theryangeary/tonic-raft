@@ -1,6 +1,5 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tonic_raft::log::InMemoryLog;
-use tonic_raft::server::RaftService;
+use tonic_raft::{log::InMemoryLog, server::RaftService};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

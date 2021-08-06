@@ -1,7 +1,8 @@
-use std::net::SocketAddr;
-use std::ops::Deref;
-use tonic::transport::server::{Router, Unimplemented};
-use tonic::transport::Server;
+use std::{net::SocketAddr, ops::Deref};
+use tonic::transport::{
+    server::{Router, Unimplemented},
+    Server,
+};
 
 use crate::{ConsensusModule, ConsensusServer, Entry, Log};
 

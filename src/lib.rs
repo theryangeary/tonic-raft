@@ -8,5 +8,4 @@ pub mod raft {
 
 pub use consensus::{ConsensusModule, Role};
 pub use log::Log;
-pub use raft::consensus_server::ConsensusServer;
-pub use raft::Entry;
+pub use raft::{consensus_server::ConsensusServer, Entry};

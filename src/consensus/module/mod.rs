@@ -1,20 +1,25 @@
 use futures::stream::{Stream, StreamExt};
-use std::future::Future;
-use std::net::SocketAddr;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    future::Future,
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
-use tokio::sync::RwLock;
-use tokio::sync::{broadcast, mpsc};
-use tokio::task::JoinHandle;
+use tokio::{
+    sync::{broadcast, mpsc, RwLock},
+    task::JoinHandle,
+};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Request;
 
-use crate::consensus::ClusterMember;
-use crate::log::Transition;
-use crate::raft::{consensus_client::ConsensusClient, AppendEntriesRequest};
-use crate::{Entry, Log, Role};
+use crate::{
+    consensus::ClusterMember,
+    log::Transition,
+    raft::{consensus_client::ConsensusClient, AppendEntriesRequest},
+    Entry, Log, Role,
+};
 
 mod consensus;
 mod new;

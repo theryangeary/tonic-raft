@@ -1,6 +1,5 @@
 use serde::Serialize;
-use std::convert::TryInto;
-use std::sync::Arc;
+use std::{convert::TryInto, sync::Arc};
 use tokio::sync::RwLock;
 
 use crate::Entry;

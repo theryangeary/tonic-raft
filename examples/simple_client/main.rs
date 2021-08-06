@@ -1,5 +1,4 @@
-use value_store::value_store_client::ValueStoreClient;
-use value_store::{GetRequest, SetRequest};
+use value_store::{value_store_client::ValueStoreClient, GetRequest, SetRequest};
 
 pub mod value_store {
     tonic::include_proto!("valuestore");

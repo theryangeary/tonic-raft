@@ -1,11 +1,13 @@
 use std::convert::TryInto;
 use tonic::{Request, Response, Status};
 
-use crate::raft::consensus_server::Consensus;
-use crate::raft::{
-    AppendEntriesRequest, AppendEntriesResponse, RequestVoteRequest, RequestVoteResponse,
+use crate::{
+    raft::{
+        consensus_server::Consensus, AppendEntriesRequest, AppendEntriesResponse,
+        RequestVoteRequest, RequestVoteResponse,
+    },
+    ConsensusModule, Entry, Log, Role,
 };
-use crate::{ConsensusModule, Entry, Log, Role};
 
 #[tonic::async_trait]
 impl<L> Consensus for ConsensusModule<L>
