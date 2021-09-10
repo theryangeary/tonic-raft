@@ -27,7 +27,7 @@ pub async fn main() {
         // construct the RPC request
         let request = tonic::Request::new(SetRequest { value: *value });
         // make the RPC
-        let response = client.set(request).await.unwrap();
+        let _response = client.set(request).await.unwrap();
     } else {
         // construct the RPC request
         let request = tonic::Request::new(GetRequest {});

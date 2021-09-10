@@ -1,7 +1,6 @@
 use futures::stream::{Stream, StreamExt};
 use std::{
-    future::Future,
-    net::SocketAddr,
+    future::{self, Future},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -124,12 +123,12 @@ where
             .filter_map(|result| match result {
                 Err(e) => {
                     eprintln!("failed to append entries: {:?}", e);
-                    None
+                    future::ready(None)
                 }
-                Ok(t) => Some(t),
+                Ok(t) => future::ready(Some(t)),
             });
 
-        while let Some(append_entry_result) = append_entries_results_stream.next().await {
+        while let Some(_append_entry_result) = append_entries_results_stream.next().await {
             // TODO do something
         }
 
@@ -190,9 +189,9 @@ where
     ///
     /// This function loads an atomic, so callers should store the result as a local variable to
     /// reduce contention unless callers require the atomicity.
-    fn last_applied(&self) -> u64 {
-        self.last_applied.load(Ordering::SeqCst)
-    }
+    //fn last_applied(&self) -> u64 {
+    //self.last_applied.load(Ordering::SeqCst)
+    //}
 
     /// Set current last_applied
     ///
@@ -238,9 +237,9 @@ where
     }
 
     /// Get number of brokers needed as a minimum to constitute a majority
-    async fn majority(&self) -> usize {
-        self.cluster_members.read().await.len() / 2 + 1
-    }
+    //async fn majority(&self) -> usize {
+    //self.cluster_members.read().await.len() / 2 + 1
+    //}
 
     /// Get cluster_members
     async fn cluster_members(&self) -> Vec<ClusterMember> {
@@ -248,14 +247,14 @@ where
     }
 
     /// Get Iterator over socket addresses of all cluster members
-    async fn cluster_member_socket_addresses(&self) -> Vec<SocketAddr> {
-        self.cluster_members
-            .read()
-            .await
-            .iter()
-            .map(ClusterMember::socket_address)
-            .collect()
-    }
+    //async fn cluster_member_socket_addresses(&self) -> Vec<SocketAddr> {
+    //self.cluster_members
+    //.read()
+    //.await
+    //.iter()
+    //.map(ClusterMember::socket_address)
+    //.collect()
+    //}
 
     /// Perform the same operation for each broker, in parallel (in new tasks), and return the
     /// results as a stream, on a first-complete-first-returned basis
@@ -284,5 +283,12 @@ where
         }
 
         return ReceiverStream::new(rx);
+    }
+}
+
+mod tests {
+    #[test]
+    fn it_works() {
+        assert!(1 + 1 == 2)
     }
 }
