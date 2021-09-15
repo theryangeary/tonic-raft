@@ -286,9 +286,26 @@ where
     }
 }
 
+#[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-        assert!(1 + 1 == 2)
+    use crate::log::InMemoryLog;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    use super::*;
+
+    fn get_standalone_consensus_module() -> ConsensusModule<InMemoryLog> {
+        ConsensusModule::<InMemoryLog>::new(
+            1,
+            vec![SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                1234,
+            )],
+        )
+    }
+
+    #[tokio::test]
+    async fn test_starts_as_follower() {
+        let cm = get_standalone_consensus_module();
+        assert_eq!(cm.role().await, Role::Follower);
     }
 }
